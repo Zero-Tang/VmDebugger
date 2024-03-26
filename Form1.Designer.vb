@@ -66,24 +66,26 @@ Partial Class Form1
 		' ToolStripMenuItem2
 		' 
 		ToolStripMenuItem2.Name = "ToolStripMenuItem2"
-		ToolStripMenuItem2.Size = New Size(140, 22)
+		ToolStripMenuItem2.Size = New Size(180, 22)
 		ToolStripMenuItem2.Text = "New Session"
 		' 
 		' ToolStripSeparator1
 		' 
 		ToolStripSeparator1.Name = "ToolStripSeparator1"
-		ToolStripSeparator1.Size = New Size(137, 6)
+		ToolStripSeparator1.Size = New Size(177, 6)
 		' 
 		' ToolStripMenuItem3
 		' 
+		ToolStripMenuItem3.Enabled = False
 		ToolStripMenuItem3.Name = "ToolStripMenuItem3"
-		ToolStripMenuItem3.Size = New Size(140, 22)
+		ToolStripMenuItem3.Size = New Size(180, 22)
 		ToolStripMenuItem3.Text = "Go"
 		' 
 		' ToolStripMenuItem4
 		' 
+		ToolStripMenuItem4.Enabled = False
 		ToolStripMenuItem4.Name = "ToolStripMenuItem4"
-		ToolStripMenuItem4.Size = New Size(140, 22)
+		ToolStripMenuItem4.Size = New Size(180, 22)
 		ToolStripMenuItem4.Text = "Break"
 		' 
 		' TabControl1

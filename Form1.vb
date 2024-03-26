@@ -8,6 +8,8 @@ Public Class Form1
 	Dim CommandHandlers As New Dictionary(Of String, ConsoleHandler)
 	Private Function ContinueTarget(ByRef CommandArguments() As String) As Integer
 		TargetSession.ContinueExecution()
+		ToolStripMenuItem3.Enabled = False
+		ToolStripMenuItem4.Enabled = True
 		Return 0
 	End Function
 
@@ -78,6 +80,7 @@ Public Class Form1
 		PrintToCommand(String.Format("Connected to GDB Session at {0}!", TargetAddress))
 		TextBox2.Enabled = True
 		TextBox2.Focus()
+		ToolStripMenuItem2.Enabled = False
 	End Sub
 
 	Private Sub TextBox2_KeyPress(sender As Object, e As KeyPressEventArgs) Handles TextBox2.KeyPress
@@ -107,5 +110,18 @@ Public Class Form1
 			.Width = Me.Width - 60
 			.Top = Me.Height - 148
 		End With
+	End Sub
+
+	Private Sub ToolStripMenuItem4_Click(sender As Object, e As EventArgs) Handles ToolStripMenuItem4.Click
+		Dim BS As New GdbSession.BreakStatus
+		TargetSession.BreakExecution(BS)
+		PrintToCommand(String.Format("You triggered a Manual Break! Target received signal: {0}", BS.Signal))
+		ToolStripMenuItem3.Enabled = True
+		ToolStripMenuItem4.Enabled = False
+	End Sub
+
+	Private Sub Form1_KeyDown(sender As Object, e As KeyEventArgs) Handles Me.KeyDown
+		' Dim BS As New GdbSession.BreakStatus
+		' If e.KeyCode = Keys.Cancel Then TargetSession.BreakExecution(BS)
 	End Sub
 End Class

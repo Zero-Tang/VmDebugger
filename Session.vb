@@ -68,6 +68,11 @@ End Class
 Public Class GdbSession
 	Dim InternalConnection As DebuggerConnection
 	Dim TypeOfVM As VmType
+	Public Structure BreakStatus
+		Dim Signal As Integer
+		Dim ProcessorId As Integer
+		Dim CoreId As Integer
+	End Structure
 	Public Enum VmType
 		Qemu
 		Unknown
@@ -75,11 +80,18 @@ Public Class GdbSession
 	''' <summary>
 	''' Creates a GDB Session
 	''' </summary>
-	''' <param name="Connection">Specifies the connection toward the GDB Server</param>
+	''' <param name="Connection">Specifies the connection toward the GDB Server. For TCP connections, you must make sure it is connected!</param>
 	''' <param name="VirtualMachineType">Specifies the type of virtual machine. Each type of virtual machine has different extensions.</param>
 	Sub New(Connection As DebuggerConnection, Optional ByVal VirtualMachineType As VmType = VmType.Unknown)
 		InternalConnection = Connection
 		TypeOfVM = VirtualMachineType
+		Connection.Send(MakePacket("?"))
+RetryReceive:
+		Dim RecvData() As Byte = ReceivePacket()
+		Dim RecvString As String = Encoding.ASCII.GetString(RecvData)
+		If RecvString = "+" Then GoTo RetryReceive
+		Debug.Print("Reason of Target Halt: " + RecvString)
+		SendAcknowledgement()
 	End Sub
 	''' <summary>
 	''' Creates a raw packet of data, including its checksums.
@@ -99,10 +111,15 @@ Public Class GdbSession
 		Debug.Print(String.Format("Sending Packet: {0}", PacketString))
 		Return Encoding.ASCII.GetBytes(PacketString)
 	End Function
+	Private Sub SendAcknowledgement(Optional ByVal Acknowledged As Boolean = True)
+		Dim CommandData(0) As Byte
+		CommandData(0) = IIf(Acknowledged, Asc("+"), Asc("-"))
+		InternalConnection.Send(CommandData)
+	End Sub
 	''' <summary>
-	''' Receives a full-fledged packet!
+	''' Receives the full content of the packet.
 	''' </summary>
-	''' <returns></returns>
+	''' <returns>The content of the packet. It can be either an acknowledgement or a packet.</returns>
 	Private Function ReceivePacket() As Byte()
 		If InternalConnection.ConnectionType = DebuggerConnection.ConnectionStyle.Stream Then
 			Dim PacketData(-1) As Byte
@@ -153,8 +170,37 @@ Public Class GdbSession
 		Dim CmdData() As Byte = MakePacket("c")
 		InternalConnection.Send(CmdData)
 		Dim RecvData() As Byte = ReceivePacket()
-		Debug.Print(String.Format("[Length={0}] Received on Continue: {1}", RecvData.Length, Encoding.ASCII.GetString(RecvData)))
+		Dim RecvString As String = Encoding.ASCII.GetString(RecvData)
+		Debug.Print(String.Format("[Length={0}] Received on Continue: {1}", RecvData.Length, RecvString))
 	End Sub
+	''' <summary>
+	''' Breaks the execution of the target.
+	''' </summary>
+	Public Sub BreakExecution(ByRef Status As BreakStatus)
+		Dim CmdData(0) As Byte
+		CmdData(0) = 3
+		InternalConnection.Send(CmdData)
+		Dim RecvData() As Byte = ReceivePacket()
+		Dim RecvString As String = Encoding.ASCII.GetString(RecvData)
+		Debug.Print(String.Format("[Length={0}] Received on Manual Break: {1}", RecvData.Length, RecvString))
+		SendAcknowledgement()
+		Dim StatusString As String = RecvString.Substring(1, RecvString.Length - 4)
+		Select Case StatusString.Substring(0, 1)
+			Case "S"
+				Status.Signal = CInt(StatusString.Substring(1, 2))
+			Case "T"
+				Status.Signal = CInt(StatusString.Substring(1, 2))
+			Case Else
+				Debug.Print("Unknown Stop-Reply Packet ID!")
+		End Select
+	End Sub
+	''' <summary>
+	''' Reads memory from the target.
+	''' For QEMU targets, make sure if GDB stub is in physical mode or virtual mode.
+	''' </summary>
+	''' <param name="Address">The starting address of the memory.</param>
+	''' <param name="Length">The length in bytes of the memory.</param>
+	''' <returns>The memory contents specified by the range.</returns>
 	Public Function ReadMemory(ByVal Address As Long, ByVal Length As Integer) As Byte()
 		Dim CmdData() As Byte = MakePacket(String.Format("m {0:x16},{1:x}", Address, Length))
 		InternalConnection.Send(CmdData)
@@ -163,9 +209,10 @@ RetryReceive:
 		Dim RecvString As String = Encoding.ASCII.GetString(RecvData)
 		Debug.Print(String.Format("[Length={0}] Received on Read-Mem: {1}", RecvData.Length, RecvString))
 		If RecvString = "+" Then GoTo RetryReceive
+		SendAcknowledgement()
 		Dim MemoryHexData As String = RecvString.Substring(1, RecvData.Length - 4)
 		Dim MemoryData(MemoryHexData.Length / 2 - 1) As Byte
-		Dim i As Integer = 0
+		Dim i As Integer
 		For i = 0 To MemoryHexData.Length - 1 Step 2
 			MemoryData(i / 2) = Convert.ToByte(MemoryHexData.Substring(i, 2), 16)
 		Next
