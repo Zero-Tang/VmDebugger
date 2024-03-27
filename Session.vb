@@ -66,6 +66,7 @@ Public Class DebuggerConnection
 End Class
 
 Public Class GdbSession
+	Public KnownModules As New List(Of PEImage)
 	Dim InternalConnection As DebuggerConnection
 	Dim TypeOfVM As VmType
 	Public Structure BreakStatus

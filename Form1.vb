@@ -4,8 +4,31 @@ Imports Microsoft.VisualBasic.FileIO
 Public Class Form1
 	Private Delegate Function ConsoleHandler(ByRef CommandArguments() As String) As Integer
 	Dim TargetSession As GdbSession
+	Dim SymMgr As New SymbolManager(Application.StartupPath, New List(Of String))
 	' We will use dictionary to register all commands, and - maybe in future - support custom scripted extensions.
 	Dim CommandHandlers As New Dictionary(Of String, ConsoleHandler)
+	Private Function LoadModule(ByRef CommandArguments() As String) As Integer
+		If CommandArguments.Length < 4 Then PrintToCommand(String.Format("Command Format: .modload [Image-Name] [Image-Base] [Image-End]"))
+		Dim ImgName As String = CommandArguments(1)
+		Dim Starting As Long, Ending As Long
+		If CommandArguments(2).StartsWith("0x") Then
+			Starting = Convert.ToInt64(CommandArguments(2).Substring(2), 16)
+		Else
+			Starting = Convert.ToInt64(CommandArguments(2), 16)
+		End If
+		If CommandArguments(3).StartsWith("0x") Then
+			Ending = Convert.ToInt64(CommandArguments(3).Substring(2), 16)
+		Else
+			Ending = Convert.ToInt64(CommandArguments(3), 16)
+		End If
+		Dim PEImg As New PEImage(TargetSession, Starting, CInt(Ending - Starting))
+		PrintToCommand(String.Format("Image is loaded! CodeView GUID={0}", PEImg.CvGuid))
+		Dim SymFile As String = SymMgr.DownloadSymbol(PEImg.CvFileName, PEImg.CvGuidString)
+		Dim SymMod As New SymbolModule(SymMgr, ImgName, SymFile, Starting, CInt(Ending - Starting))
+		SymMod.InitSymbols()
+		Return 0
+	End Function
+
 	Private Function ContinueTarget(ByRef CommandArguments() As String) As Integer
 		TargetSession.ContinueExecution()
 		ToolStripMenuItem3.Enabled = False
@@ -64,6 +87,7 @@ Public Class Form1
 		' Register commands to dictionary.
 		CommandHandlers.Add("g", AddressOf ContinueTarget)
 		CommandHandlers.Add("db", AddressOf ReadMemory)
+		CommandHandlers.Add(".modload", AddressOf LoadModule)
 	End Sub
 
 	Private Sub PrintToCommand(ByVal Text As String, Optional ByVal Ending As String = vbCrLf)
