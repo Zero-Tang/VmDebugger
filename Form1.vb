@@ -25,7 +25,6 @@ Public Class Form1
 		PrintToCommand(String.Format("Image is loaded! CodeView GUID={0}", PEImg.CvGuid))
 		Dim SymFile As String = SymMgr.DownloadSymbol(PEImg.CvFileName, PEImg.CvGuidString)
 		Dim SymMod As New SymbolModule(SymMgr, ImgName, SymFile, Starting, CInt(Ending - Starting))
-		SymMod.InitSymbols()
 		Return 0
 	End Function
 
@@ -48,7 +47,12 @@ Public Class Form1
 			ElseIf CommandArguments(1).StartsWith("0x") Then
 				Address = Convert.ToInt64(CommandArguments(1).Substring(2), 16)
 			Else
-				Address = Convert.ToInt64(CommandArguments(1), 16)
+				Try
+					Address = Convert.ToInt64(CommandArguments(1), 16)
+				Catch Ex As FormatException
+					Dim Sym As Symbol = SymMgr.SymbolFromName(CommandArguments(1))
+					Address = Sym.Address
+				End Try
 			End If
 		End If
 		Dim MemoryData As Byte() = TargetSession.ReadMemory(Address, Length)

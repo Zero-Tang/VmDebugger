@@ -1,5 +1,4 @@
 ﻿Imports System.ComponentModel
-Imports System.Configuration
 Imports System.IO
 Imports System.Net
 Imports System.Runtime.InteropServices
@@ -7,6 +6,7 @@ Imports System.Runtime.InteropServices
 Public Class SymbolManager
 	Private Delegate Function SymEnumerateSymbolsCallback(ByVal SymInfo As IntPtr, ByVal SymbolSize As Integer, ByVal UserContext As IntPtr) As Boolean
 	Private Declare Unicode Function SymEnumSymbolsExW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal BaseOfDll As Long, ByVal Mask As String, ByVal EnumSymbolsCallback As SymEnumerateSymbolsCallback, ByVal UserContext As IntPtr, ByVal Options As Integer) As Boolean
+	Private Declare Unicode Function SymFromNameW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal Name As String, ByVal SymbolInfo As IntPtr) As Boolean
 	Private Declare Unicode Function SymInitializeW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal UserSearchPath As String, ByVal InvadeProcess As Boolean) As Boolean
 	Private Declare Function GetCurrentProcess Lib "kernel32.dll" () As IntPtr
 	Public SymbolServers As List(Of String)
@@ -41,20 +41,29 @@ Public Class SymbolManager
 	''' <param name="SymbolGuid">The GUID of symbol in order to identify the correct copy of symbol.</param>
 	''' <returns>The file path to the symbol file.</returns>
 	Public Function DownloadSymbol(ByVal SymbolName As String, ByVal SymbolGuid As String) As String
+		' Check if SymbolName is a path.
+		Dim FileName As String = SymbolName
+		If SymbolName.Contains("\") Then
+			Dim FnArray() As String = SymbolName.Split("\")
+			FileName = FnArray(FnArray.Length - 1)
+		End If
+		' Check if we have already downloaded it.
 		Dim LocalFile As String = String.Format("{0}\{1}\{2}\{1}", LocalStorage, SymbolName, SymbolGuid)
 		If Directory.Exists(LocalFile) Then
 			Debug.Print("Symbol File for {0} already exists at {1}!", SymbolName, LocalFile)
 			Return LocalFile
 		End If
+		' Make sure the directory exists before we download.
+		Directory.CreateDirectory(String.Format("{0}\{1}\{2}", LocalStorage, SymbolName, SymbolGuid))
 		For Each SymSrv In SymbolServers
+			' Try all servers we know.
 			Dim Url As String = String.Format("{0}/{1}/{2}/{1}", SymSrv, SymbolName, SymbolGuid)
 			Debug.Print("Trying to download from {0}...", Url)
 			Try
-				Dim SymData() As Byte = WebC.DownloadData(Url)
-				Directory.CreateDirectory(String.Format("{0}\{1}\{2}", LocalStorage, SymbolName, SymbolGuid))
-				Dim fs As New FileStream(LocalFile, FileMode.Create, FileAccess.Write)
-				fs.Write(SymData)
-				fs.Close()
+				Dim T1 As Long = Now.Ticks
+				WebC.DownloadFile(Url, LocalFile)
+				Dim T2 As Long = Now.Ticks
+				Debug.Print("Successfully downloaded {0} with {1:F3} seconds", SymbolName, CDbl(T2 - T1) / CDbl(TimeSpan.TicksPerMillisecond * 1000))
 				Return LocalFile
 			Catch Ex As WebException
 				Debug.Print("Failed to download from {0}! Trying next server...", Url)
@@ -63,21 +72,37 @@ Public Class SymbolManager
 		' If no hit, throw an exception.
 		Throw New WebException(String.Format("Failed to download symbol file {0} with GUID of {1}!", SymbolName, SymbolGuid))
 	End Function
+	''' <summary>
+	''' Creates a temporary symbol object by using SymFromNameW API.
+	''' </summary>
+	''' <param name="Name">Name of the symbol</param>
+	''' <returns>The temporary Symbol object</returns>
+	Public Function SymbolFromName(ByVal Name As String) As Symbol
+		Dim SymInfo As IntPtr = Marshal.AllocHGlobal(2048)
+		Marshal.WriteInt32(SymInfo, 0, 2048)
+		If SymFromNameW(GetCurrentProcess(), Name, SymInfo) = False Then
+			Dim ErrCode As Integer = Err.LastDllError
+			Marshal.FreeHGlobal(SymInfo)    ' Clean up unmanaged stuff before throwing exception!
+			Throw New Win32Exception(ErrCode, "Failed to execute SymFromNameW!")
+		End If
+		Dim NewSym As New Symbol(SymInfo)
+		Marshal.FreeHGlobal(SymInfo)
+		Return NewSym
+	End Function
 End Class
 
 Public Class SymbolModule
 	Private Delegate Function SymEnumerateSymbolsCallback(ByVal SymInfo As IntPtr, ByVal SymbolSize As Integer, ByVal UserContext As IntPtr) As Boolean
 	Private Declare Unicode Function SymLoadModuleExW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal FileHandle As IntPtr, ByVal ImageName As String, ByVal ModuleName As String, ByVal BaseOfDll As Long, ByVal DllSize As Integer, ByVal Data As IntPtr, ByVal Flags As Integer) As Long
 	Private Declare Unicode Function SymGetModuleInfoW64 Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal Address As Long, ByVal ModuleInfo As IntPtr) As Boolean
+	Private Declare Unicode Function SymEnumSymbolsExW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal BaseOfDll As Long, ByVal Mask As IntPtr, ByVal EnumSymbolsCallback As SymEnumerateSymbolsCallback, ByVal UserContext As IntPtr, ByVal Options As Integer) As Boolean
 	Private Declare Unicode Function SymEnumSymbolsExW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal BaseOfDll As Long, ByVal Mask As String, ByVal EnumSymbolsCallback As SymEnumerateSymbolsCallback, ByVal UserContext As IntPtr, ByVal Options As Integer) As Boolean
 	Private Declare Function GetCurrentProcess Lib "kernel32.dll" () As IntPtr
 	Private Const IMAGEHLP_MODULEW64_SIZE As Integer = 2000
 	Dim Manager As SymbolManager
+	Dim ImageShortcutName As String
 	Dim ImageBase As Long
 	Dim ImageSize As Integer
-	' Symbol Maintenance Data Structures
-	Dim SymbolDictionaryByNames As New Dictionary(Of String, Symbol)
-	Dim SymbolListByAddress As New List(Of Symbol)
 	''' <summary>
 	''' Initializes a Module for navigating symbols.
 	''' </summary>
@@ -88,6 +113,8 @@ Public Class SymbolModule
 	''' <param name="Length">Specifies the length of image in the target.</param>
 	Sub New(ByVal Parent As SymbolManager, ByVal ImageName As String, ByVal ModulePath As String, ByVal Address As Long, ByVal Length As Integer)
 		Manager = Parent
+		ImageShortcutName = ImageName
+		ImageBase = Address
 		Dim ModBase As Long = SymLoadModuleExW(GetCurrentProcess(), IntPtr.Zero, ModulePath, ImageName, Address, Length, IntPtr.Zero, 0)
 		If ModBase = 0 Then
 			Dim ErrCode As Integer = Err.LastDllError
@@ -106,16 +133,6 @@ Public Class SymbolModule
 		fs.Write(ImgInfoBuff, 0, IMAGEHLP_MODULEW64_SIZE)
 		fs.Close()
 		Marshal.FreeHGlobal(ImgInfo)
-	End Sub
-
-	Public Sub InitSymbols()
-		Dim EnumSymCallback As SymEnumerateSymbolsCallback = Function(ByVal SymInfo As IntPtr, ByVal SymbolSize As Integer, ByVal UserContext As IntPtr) As Boolean
-																 Dim NameLen As Integer = Marshal.ReadInt32(SymInfo, &H4C)
-																 Dim SymName As String = Marshal.PtrToStringUni(SymInfo + &H54, NameLen - 1)
-																 SymbolDictionaryByNames.Add(SymName, New Symbol(SymInfo))
-																 Return True
-															 End Function
-		If Not SymEnumSymbolsExW(GetCurrentProcess(), ImageBase, "*!*", EnumSymCallback, IntPtr.Zero, 0) Then Throw New Win32Exception(Err.LastDllError, "Failed to execute SymEnumSymbolsExW!")
 	End Sub
 End Class
 
