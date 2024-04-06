@@ -5,6 +5,7 @@ Public Class Form1
 	Private Delegate Function ConsoleHandler(ByRef CommandArguments() As String) As Integer
 	Dim TargetSession As GdbSession
 	Dim SymMgr As New SymbolManager(Application.StartupPath, New List(Of String))
+	Dim DisAsm As New Disassembler()
 	' We will use dictionary to register all commands, and - maybe in future - support custom scripted extensions.
 	Dim CommandHandlers As New Dictionary(Of String, ConsoleHandler)
 	Private Function LoadModule(ByRef CommandArguments() As String) As Integer
@@ -35,6 +36,56 @@ Public Class Form1
 		Return 0
 	End Function
 
+	Private Function ResolveAddress(ByVal Text As String) As Long
+		Dim Address As Long
+		Dim Length As Integer = &H80
+		If Text.StartsWith("0n") Then
+			Address = Convert.ToInt64(Text.Substring(2), 10)
+		ElseIf Text.StartsWith("0x") Then
+			Address = Convert.ToInt64(Text.Substring(2), 16)
+		Else
+			Try
+				Address = Convert.ToInt64(Text, 16)
+			Catch Ex As FormatException
+				Dim Sym As Symbol = SymMgr.SymbolFromName(Text)
+				Address = Sym.Address
+			End Try
+		End If
+		Return Address
+	End Function
+
+	Private Function DisassembleInstructions(ByRef CommandArguments() As String) As Integer
+		Dim Address As Long
+		Dim Length As Integer = 8
+		If CommandArguments.Length < 2 Then
+			PrintToCommand(String.Format("Additional parameter required for target address!"))
+			Return 1
+		Else
+			Address = ResolveAddress(CommandArguments(1))
+		End If
+		Dim i As Integer
+		For i = 0 To Length - 1 Step 1
+			' Maximum size of an instruction in x86 is merely 15 bytes.
+			Dim InstructionBytes() As Byte = TargetSession.ReadMemory(Address, 15)
+			' Disassemble it (Currently assume 64-bit code).
+			Dim TargetInstruction As Instruction = DisAsm.Decode64(InstructionBytes)
+			Dim Mnemonic As String = DisAsm.Format64(TargetInstruction, Address)
+			Dim j As Integer
+			' Print address of this instruction
+			PrintToCommand(String.Format("0x{0:X16}", Address), vbTab)
+			' Print raw bytes of this instruction
+			For j = 0 To TargetInstruction.Length - 1 Step 1
+				PrintToCommand(String.Format("{0:x2}", InstructionBytes(j)), "")
+			Next
+			PrintToCommand("", vbTab)
+			' Print mnemonic of this instruction
+			PrintToCommand(Mnemonic)
+			' Advance rip
+			Address += TargetInstruction.Length
+		Next
+		Return 0
+	End Function
+
 	Private Function ReadMemory(ByRef CommandArguments() As String) As Integer
 		Dim Address As Long
 		Dim Length As Integer = &H80
@@ -42,18 +93,7 @@ Public Class Form1
 			PrintToCommand(String.Format("Additional parameter required for target address!"))
 			Return 1
 		Else
-			If CommandArguments(1).StartsWith("0n") Then
-				Address = Convert.ToInt64(CommandArguments(1).Substring(2), 10)
-			ElseIf CommandArguments(1).StartsWith("0x") Then
-				Address = Convert.ToInt64(CommandArguments(1).Substring(2), 16)
-			Else
-				Try
-					Address = Convert.ToInt64(CommandArguments(1), 16)
-				Catch Ex As FormatException
-					Dim Sym As Symbol = SymMgr.SymbolFromName(CommandArguments(1))
-					Address = Sym.Address
-				End Try
-			End If
+			Address = ResolveAddress(CommandArguments(1))
 		End If
 		Dim MemoryData As Byte() = TargetSession.ReadMemory(Address, Length)
 		If CommandArguments(0) = "db" Then
@@ -91,6 +131,7 @@ Public Class Form1
 		' Register commands to dictionary.
 		CommandHandlers.Add("g", AddressOf ContinueTarget)
 		CommandHandlers.Add("db", AddressOf ReadMemory)
+		CommandHandlers.Add("u", AddressOf DisassembleInstructions)
 		CommandHandlers.Add(".modload", AddressOf LoadModule)
 	End Sub
 

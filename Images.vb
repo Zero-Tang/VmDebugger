@@ -50,7 +50,7 @@ Public Class PEImage
 			Dim DebugDirPtr As Long = ImageBase + e_lfanew + &H88 + IMAGE_DIRECTORY_ENTRY_DEBUG * 8
 			Dim DebugDirBase As Long = ImageBase + BitConverter.ToInt32(InternalSession.ReadMemory(DebugDirPtr, 4), 0)
 			Dim DebugDirLen As Integer = BitConverter.ToInt32(InternalSession.ReadMemory(DebugDirPtr + 4, 4), 0)
-			Debug.Print("Debug Directory: {0}, Length: {1}", DebugDirBase, DebugDirLen)
+			Debug.Print("Debug Directory: 0x{0:X16}, Length: {1}", DebugDirBase, DebugDirLen)
 			Dim DebugInfoType As Integer = BitConverter.ToInt32(InternalSession.ReadMemory(DebugDirBase + &HC, 4), 0)
 			If DebugInfoType <> 2 Then Throw New Exception("Only CodeView Debug Information is supported!")
 			Dim CvBase As Long = ImageBase + BitConverter.ToInt32(InternalSession.ReadMemory(DebugDirBase + &H14, 4), 0)

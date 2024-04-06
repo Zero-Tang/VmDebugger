@@ -83,6 +83,7 @@ Public Class GdbSession
 	''' </summary>
 	''' <param name="Connection">Specifies the connection toward the GDB Server. For TCP connections, you must make sure it is connected!</param>
 	''' <param name="VirtualMachineType">Specifies the type of virtual machine. Each type of virtual machine has different extensions.</param>
+	''' <remarks>Target is halted once the connection is established.</remarks>
 	Sub New(Connection As DebuggerConnection, Optional ByVal VirtualMachineType As VmType = VmType.Unknown)
 		InternalConnection = Connection
 		TypeOfVM = VirtualMachineType

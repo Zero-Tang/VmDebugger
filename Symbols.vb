@@ -7,6 +7,7 @@ Public Class SymbolManager
 	Private Delegate Function SymEnumerateSymbolsCallback(ByVal SymInfo As IntPtr, ByVal SymbolSize As Integer, ByVal UserContext As IntPtr) As Boolean
 	Private Declare Unicode Function SymEnumSymbolsExW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal BaseOfDll As Long, ByVal Mask As String, ByVal EnumSymbolsCallback As SymEnumerateSymbolsCallback, ByVal UserContext As IntPtr, ByVal Options As Integer) As Boolean
 	Private Declare Unicode Function SymFromNameW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal Name As String, ByVal SymbolInfo As IntPtr) As Boolean
+	Private Declare Unicode Function SymFromAddrW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal Address As Long, ByRef Displacement As Long, ByVal SymbolInfo As IntPtr) As Boolean
 	Private Declare Unicode Function SymInitializeW Lib "dbghelp.dll" (ByVal ProcessHandle As IntPtr, ByVal UserSearchPath As String, ByVal InvadeProcess As Boolean) As Boolean
 	Private Declare Function GetCurrentProcess Lib "kernel32.dll" () As IntPtr
 	Public SymbolServers As List(Of String)
@@ -73,7 +74,7 @@ Public Class SymbolManager
 		Throw New WebException(String.Format("Failed to download symbol file {0} with GUID of {1}!", SymbolName, SymbolGuid))
 	End Function
 	''' <summary>
-	''' Creates a temporary symbol object by using SymFromNameW API.
+	''' Creates a temporary symbol object by using SymFromNameW API, according to the name of symbol.
 	''' </summary>
 	''' <param name="Name">Name of the symbol</param>
 	''' <returns>The temporary Symbol object</returns>
@@ -84,6 +85,24 @@ Public Class SymbolManager
 			Dim ErrCode As Integer = Err.LastDllError
 			Marshal.FreeHGlobal(SymInfo)    ' Clean up unmanaged stuff before throwing exception!
 			Throw New Win32Exception(ErrCode, "Failed to execute SymFromNameW!")
+		End If
+		Dim NewSym As New Symbol(SymInfo)
+		Marshal.FreeHGlobal(SymInfo)
+		Return NewSym
+	End Function
+	''' <summary>
+	''' Creates a temporary symbol object by using SymFromAddrW API, according to the address of symbol and also acquire the displacement from symbol.
+	''' </summary>
+	''' <param name="Address">Address of the symbol</param>
+	''' <param name="Displacement">Receives the displacement from symbol</param>
+	''' <returns>The temporary Symbol object</returns>
+	Public Function SymbolFromAddress(ByVal Address As Long, ByRef Displacement As Long) As Symbol
+		Dim SymInfo As IntPtr = Marshal.AllocHGlobal(2048)
+		Marshal.WriteInt32(SymInfo, 0, 2048)
+		If SymFromAddrW(GetCurrentProcess(), Address, Displacement, SymInfo) = False Then
+			Dim ErrCode As Integer = Err.LastDllError
+			Marshal.FreeHGlobal(SymInfo)
+			Throw New Win32Exception(ErrCode, "Failed to execute SymFromAddrW!")
 		End If
 		Dim NewSym As New Symbol(SymInfo)
 		Marshal.FreeHGlobal(SymInfo)
